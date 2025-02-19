@@ -454,7 +454,11 @@ pub fn gen_modrm_resolve_with_local(
         ctx.builder.free_local(address);
     }
 }
-pub fn gen_modrm_resolve_with_esp_offset(ctx: &mut JitContext, modrm_byte: ModrmByte, esp_offset: i32) {
+pub fn gen_modrm_resolve_with_esp_offset(
+    ctx: &mut JitContext,
+    modrm_byte: ModrmByte,
+    esp_offset: i32,
+) {
     modrm::gen(ctx, modrm_byte, esp_offset)
 }
 
@@ -1108,7 +1112,7 @@ pub fn gen_safe_read_write(
         }
 
         ctx.builder
-            .const_i32(ctx.start_of_current_instruction as i32);
+            .const_i32(ctx.start_of_current_instruction as i32 & 0xFFF);
 
         match bits {
             BitSize::BYTE => {
@@ -1410,7 +1414,7 @@ pub fn gen_task_switch_test(ctx: &mut JitContext) {
         gen_fn1_const(
             ctx.builder,
             "task_switch_test_jit",
-            ctx.start_of_current_instruction,
+            ctx.start_of_current_instruction & 0xFFF,
         );
         ctx.builder.br(ctx.exit_with_fault_label);
     }
@@ -1432,7 +1436,7 @@ pub fn gen_task_switch_test_mmx(ctx: &mut JitContext) {
         gen_fn1_const(
             ctx.builder,
             "task_switch_test_mmx_jit",
-            ctx.start_of_current_instruction,
+            ctx.start_of_current_instruction & 0xFFF,
         );
         ctx.builder.br(ctx.exit_with_fault_label);
     }
@@ -2503,7 +2507,7 @@ pub fn gen_trigger_de(ctx: &mut JitContext) {
     gen_fn1_const(
         ctx.builder,
         "trigger_de_jit",
-        ctx.start_of_current_instruction,
+        ctx.start_of_current_instruction & 0xFFF,
     );
     gen_debug_track_jit_exit(ctx.builder, ctx.start_of_current_instruction);
     ctx.builder.br(ctx.exit_with_fault_label);
@@ -2513,7 +2517,7 @@ pub fn gen_trigger_ud(ctx: &mut JitContext) {
     gen_fn1_const(
         ctx.builder,
         "trigger_ud_jit",
-        ctx.start_of_current_instruction,
+        ctx.start_of_current_instruction & 0xFFF,
     );
     gen_debug_track_jit_exit(ctx.builder, ctx.start_of_current_instruction);
     ctx.builder.br(ctx.exit_with_fault_label);
@@ -2524,7 +2528,7 @@ pub fn gen_trigger_gp(ctx: &mut JitContext, error_code: u32) {
         ctx.builder,
         "trigger_gp_jit",
         error_code,
-        ctx.start_of_current_instruction,
+        ctx.start_of_current_instruction & 0xFFF,
     );
     gen_debug_track_jit_exit(ctx.builder, ctx.start_of_current_instruction);
     ctx.builder.br(ctx.exit_with_fault_label);
@@ -2644,7 +2648,7 @@ pub fn gen_profiler_stat_increment(builder: &mut WasmBuilder, stat: profiler::st
     if !cfg!(feature = "profiler") {
         return;
     }
-    let addr = unsafe { profiler::stat_array.as_mut_ptr().offset(stat as isize) } as u32;
+    let addr = unsafe { &raw mut profiler::stat_array[stat as usize] } as u32;
     builder.increment_fixed_i64(addr, 1)
 }
 

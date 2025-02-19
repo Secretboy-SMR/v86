@@ -20,7 +20,6 @@ const config = {
     filesystem: {},
     log_level: 0,
     disable_jit: +process.env.DISABLE_JIT,
-    screen_dummy: true,
 };
 
 const emulator = new V86(config);
@@ -37,7 +36,7 @@ emulator.add_listener("serial0-output-byte", function(byte)
         serial_text = "";
         if(did_restart) {
             console.log("Ok");
-            emulator.stop();
+            emulator.destroy();
         }
         else {
             console.log("Calling restart()");

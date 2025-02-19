@@ -23,7 +23,6 @@ var emulator = new V86({
 
 emulator.bus.register("emulator-started", function()
 {
-    console.error("Booting now, please stand by");
     emulator.create_file("test-i386", test_executable);
 });
 
@@ -65,6 +64,6 @@ emulator.add_listener("serial0-output-byte", async function(byte)
         console.error("Got result, writing to stdout");
 
         process.stdout.write(Buffer.from(data));
-        emulator.stop();
+        emulator.destroy();
     }
 });

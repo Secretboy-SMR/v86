@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 "use strict";
 
-// This test checks that calling emulator.stop() will remove all event
+// This test checks that calling emulator.destroy() will remove all event
 // listeners, so that the nodejs process cleanly and automatically exits.
 
 const TEST_RELEASE_BUILD = +process.env.TEST_RELEASE_BUILD;
@@ -21,7 +21,6 @@ const config = {
     filesystem: {},
     log_level: 0,
     disable_jit: +process.env.DISABLE_JIT,
-    screen_dummy: true,
 };
 
 const emulator = new V86(config);
@@ -29,6 +28,6 @@ const emulator = new V86(config);
 setTimeout(function()
     {
         console.error("Calling stop()");
-        emulator.stop();
+        emulator.destroy();
         console.error("Called stop()");
     }, 3000);

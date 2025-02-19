@@ -1,7 +1,21 @@
 "use strict";
 
 var goog = goog || {};
-goog.exportSymbol = function() {};
+goog.exportSymbol = function(name, sym) {
+    if(typeof module !== "undefined" && typeof module.exports !== "undefined")
+    {
+        module.exports[name] = sym;
+    }
+    else if(typeof window !== "undefined")
+    {
+        window[name] = sym;
+    }
+    else if(typeof importScripts === "function")
+    {
+        // web worker
+        self[name] = sym;
+    }
+};
 goog.exportProperty = function() {};
 
 var v86util = v86util || {};
@@ -132,7 +146,7 @@ function hex_dump(buffer)
 
 if(typeof crypto !== "undefined" && crypto.getRandomValues)
 {
-    let rand_data = new Int32Array(1);
+    const rand_data = new Int32Array(1);
 
     v86util.get_rand_int = function()
     {
@@ -157,22 +171,8 @@ else
 
 (function()
 {
-    if(typeof Math.clz32 === "function" && Math.clz32(0) === 32 &&
-       Math.clz32(0x12345) === 15 && Math.clz32(-1) === 0)
+    if(typeof Math.clz32 === "function" && Math.clz32(0) === 32 && Math.clz32(0x12345) === 15 && Math.clz32(-1) === 0)
     {
-        /**
-         * calculate the integer logarithm base 2 of a byte
-         * @param {number} x
-         * @return {number}
-         */
-        v86util.int_log2_byte = function(x)
-        {
-            dbg_assert(x > 0);
-            dbg_assert(x < 0x100);
-
-            return 31 - Math.clz32(x);
-        };
-
         /**
          * calculate the integer logarithm base 2
          * @param {number} x
@@ -197,19 +197,6 @@ else
 
         int_log2_table[i] = b;
     }
-
-    /**
-     * calculate the integer logarithm base 2 of a byte
-     * @param {number} x
-     * @return {number}
-     */
-    v86util.int_log2_byte = function(x)
-    {
-        dbg_assert(x > 0);
-        dbg_assert(x < 0x100);
-
-        return int_log2_table[x];
-    };
 
     /**
      * calculate the integer logarithm base 2
@@ -251,6 +238,27 @@ else
     };
 })();
 
+v86util.round_up_to_next_power_of_2 = function(x)
+{
+    dbg_assert(x >= 0);
+    return x <= 1 ? 1 : 1 << 1 + v86util.int_log2(x - 1);
+};
+
+if(DEBUG)
+{
+    dbg_assert(v86util.int_log2(1) === 0);
+    dbg_assert(v86util.int_log2(2) === 1);
+    dbg_assert(v86util.int_log2(7) === 2);
+    dbg_assert(v86util.int_log2(8) === 3);
+    dbg_assert(v86util.int_log2(123456789) === 26);
+
+    dbg_assert(v86util.round_up_to_next_power_of_2(0) === 1);
+    dbg_assert(v86util.round_up_to_next_power_of_2(1) === 1);
+    dbg_assert(v86util.round_up_to_next_power_of_2(2) === 2);
+    dbg_assert(v86util.round_up_to_next_power_of_2(7) === 8);
+    dbg_assert(v86util.round_up_to_next_power_of_2(8) === 8);
+    dbg_assert(v86util.round_up_to_next_power_of_2(123456789) === 134217728);
+}
 
 /**
  * @constructor
@@ -459,7 +467,7 @@ CircularQueue.prototype.set = function(new_data)
 
 function dump_file(ab, name)
 {
-    if(!(ab instanceof Array))
+    if(!Array.isArray(ab))
     {
         ab = [ab];
     }
@@ -576,8 +584,8 @@ function load_file(filename, options, n_tries)
 
     if(options.range)
     {
-        let start = options.range.start;
-        let end = start + options.range.length - 1;
+        const start = options.range.start;
+        const end = start + options.range.length - 1;
         http.setRequestHeader("Range", "bytes=" + start + "-" + end);
         http.setRequestHeader("X-Accept-Encoding", "identity");
 
@@ -587,6 +595,7 @@ function load_file(filename, options, n_tries)
         {
             if(http.status === 200)
             {
+                console.error("Server sent full file in response to ranged request, aborting", { filename });
                 http.abort();
             }
         };
@@ -608,7 +617,7 @@ function load_file(filename, options, n_tries)
             {
                 if(options.range)
                 {
-                    let enc = http.getResponseHeader("Content-Encoding");
+                    const enc = http.getResponseHeader("Content-Encoding");
                     if(enc && enc !== "identity")
                     {
                         console.error("Server sent Content-Encoding in response to ranged request", {filename, enc});
@@ -647,7 +656,7 @@ function load_file(filename, options, n_tries)
 
 function load_file_nodejs(filename, options)
 {
-    let fs = require("fs");
+    const fs = require("fs");
 
     if(options.range)
     {
@@ -657,7 +666,7 @@ function load_file_nodejs(filename, options)
             {
                 if(err) throw err;
 
-                let length = options.range.length;
+                const length = options.range.length;
                 var buffer = Buffer.allocUnsafe(length);
 
                 fs["read"](fd, buffer, 0, length, options.range.start, (err, bytes_read) =>

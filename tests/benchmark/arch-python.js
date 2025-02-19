@@ -16,8 +16,7 @@ const emulator = new V86({
     vga_memory_size: 8 * 1024 * 1024,
     network_relay_url: "<UNUSED>",
     initial_state: { url: path.join(V86_ROOT, "/images/arch_state.bin") },
-    filesystem: { baseurl: path.join(V86_ROOT, "/images/arch-nongz/") },
-    screen_dummy: true,
+    filesystem: { baseurl: path.join(V86_ROOT, "/images/arch/") },
     disable_jit: +process.env.DISABLE_JIT,
     log_level: 0,
 });
@@ -55,7 +54,7 @@ emulator.add_listener("serial0-output-byte", function(byte)
 
         if(line.startsWith("sys"))
         {
-            emulator.stop();
+            emulator.destroy();
 
             if(BENCH_COLLECT_STATS)
             {

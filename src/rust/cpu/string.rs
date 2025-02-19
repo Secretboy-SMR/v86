@@ -23,6 +23,7 @@ use cpu::memory::{
     memset_no_mmap_or_dirty_check, read16_no_mmap_check, read32_no_mmap_check, read8_no_mmap_check,
     write16_no_mmap_or_dirty_check, write32_no_mmap_or_dirty_check, write8_no_mmap_or_dirty_check,
 };
+use jit;
 use page::Page;
 
 fn count_until_end_of_page(direction: i32, size: i32, addr: u32) -> u32 {
@@ -62,7 +63,7 @@ enum Rep {
 #[inline(always)]
 unsafe fn string_instruction(
     is_asize_32: bool,
-    ds: i32,
+    ds_or_prefix: i32,
     instruction: Instruction,
     size: Size,
     rep: Rep,
@@ -71,12 +72,31 @@ unsafe fn string_instruction(
 
     let direction = if 0 != *flags & FLAG_DIRECTION { -1 } else { 1 };
 
+    let mut count = match rep {
+        Rep::Z | Rep::NZ => {
+            let c = (read_reg32(ECX) & asize_mask) as u32;
+            if c == 0 {
+                return;
+            };
+            c
+        },
+        Rep::None => 0,
+    };
+
     let es = match instruction {
         Instruction::Movs
         | Instruction::Cmps
         | Instruction::Stos
         | Instruction::Scas
         | Instruction::Ins => return_on_pagefault!(get_seg(ES)),
+        _ => 0,
+    };
+    let ds = match instruction {
+        Instruction::Movs
+        | Instruction::Cmps
+        | Instruction::Lods
+        | Instruction::Scas
+        | Instruction::Outs => return_on_pagefault!(get_seg(ds_or_prefix)),
         _ => 0,
     };
 
@@ -111,16 +131,6 @@ unsafe fn string_instruction(
         | Instruction::Scas
         | Instruction::Ins => read_reg32(EDI) & asize_mask,
         _ => 0,
-    };
-    let mut count = match rep {
-        Rep::Z | Rep::NZ => {
-            let c = (read_reg32(ECX) & asize_mask) as u32;
-            if c == 0 {
-                return;
-            };
-            c
-        },
-        Rep::None => 0,
     };
 
     let port = match instruction {
@@ -239,7 +249,7 @@ unsafe fn string_instruction(
         dbg_assert!(count_until_end_of_page > 0);
 
         if !skip_dirty_page {
-            ::jit::jit_dirty_page(::jit::get_jit_state(), Page::page_of(phys_dst));
+            jit::jit_dirty_page(Page::page_of(phys_dst));
         }
 
         let mut rep_cmp_finished = false;
@@ -509,47 +519,47 @@ unsafe fn string_instruction(
 }
 
 #[no_mangle]
-pub unsafe fn movsb_rep(is_asize_32: bool, ds: i32) {
-    string_instruction(is_asize_32, ds, Instruction::Movs, Size::B, Rep::Z)
+pub unsafe fn movsb_rep(is_asize_32: bool, seg: i32) {
+    string_instruction(is_asize_32, seg, Instruction::Movs, Size::B, Rep::Z)
 }
 #[no_mangle]
-pub unsafe fn movsw_rep(is_asize_32: bool, ds: i32) {
-    string_instruction(is_asize_32, ds, Instruction::Movs, Size::W, Rep::Z)
+pub unsafe fn movsw_rep(is_asize_32: bool, seg: i32) {
+    string_instruction(is_asize_32, seg, Instruction::Movs, Size::W, Rep::Z)
 }
 #[no_mangle]
-pub unsafe fn movsd_rep(is_asize_32: bool, ds: i32) {
-    string_instruction(is_asize_32, ds, Instruction::Movs, Size::D, Rep::Z)
+pub unsafe fn movsd_rep(is_asize_32: bool, seg: i32) {
+    string_instruction(is_asize_32, seg, Instruction::Movs, Size::D, Rep::Z)
 }
-pub unsafe fn movsb_no_rep(is_asize_32: bool, ds: i32) {
-    string_instruction(is_asize_32, ds, Instruction::Movs, Size::B, Rep::None)
+pub unsafe fn movsb_no_rep(is_asize_32: bool, seg: i32) {
+    string_instruction(is_asize_32, seg, Instruction::Movs, Size::B, Rep::None)
 }
-pub unsafe fn movsw_no_rep(is_asize_32: bool, ds: i32) {
-    string_instruction(is_asize_32, ds, Instruction::Movs, Size::W, Rep::None)
+pub unsafe fn movsw_no_rep(is_asize_32: bool, seg: i32) {
+    string_instruction(is_asize_32, seg, Instruction::Movs, Size::W, Rep::None)
 }
-pub unsafe fn movsd_no_rep(is_asize_32: bool, ds: i32) {
-    string_instruction(is_asize_32, ds, Instruction::Movs, Size::D, Rep::None)
+pub unsafe fn movsd_no_rep(is_asize_32: bool, seg: i32) {
+    string_instruction(is_asize_32, seg, Instruction::Movs, Size::D, Rep::None)
 }
 
 #[no_mangle]
-pub unsafe fn lodsb_rep(is_asize_32: bool, ds: i32) {
-    string_instruction(is_asize_32, ds, Instruction::Lods, Size::B, Rep::Z)
+pub unsafe fn lodsb_rep(is_asize_32: bool, seg: i32) {
+    string_instruction(is_asize_32, seg, Instruction::Lods, Size::B, Rep::Z)
 }
 #[no_mangle]
-pub unsafe fn lodsw_rep(is_asize_32: bool, ds: i32) {
-    string_instruction(is_asize_32, ds, Instruction::Lods, Size::W, Rep::Z)
+pub unsafe fn lodsw_rep(is_asize_32: bool, seg: i32) {
+    string_instruction(is_asize_32, seg, Instruction::Lods, Size::W, Rep::Z)
 }
 #[no_mangle]
-pub unsafe fn lodsd_rep(is_asize_32: bool, ds: i32) {
-    string_instruction(is_asize_32, ds, Instruction::Lods, Size::D, Rep::Z)
+pub unsafe fn lodsd_rep(is_asize_32: bool, seg: i32) {
+    string_instruction(is_asize_32, seg, Instruction::Lods, Size::D, Rep::Z)
 }
-pub unsafe fn lodsb_no_rep(is_asize_32: bool, ds: i32) {
-    string_instruction(is_asize_32, ds, Instruction::Lods, Size::B, Rep::None)
+pub unsafe fn lodsb_no_rep(is_asize_32: bool, seg: i32) {
+    string_instruction(is_asize_32, seg, Instruction::Lods, Size::B, Rep::None)
 }
-pub unsafe fn lodsw_no_rep(is_asize_32: bool, ds: i32) {
-    string_instruction(is_asize_32, ds, Instruction::Lods, Size::W, Rep::None)
+pub unsafe fn lodsw_no_rep(is_asize_32: bool, seg: i32) {
+    string_instruction(is_asize_32, seg, Instruction::Lods, Size::W, Rep::None)
 }
-pub unsafe fn lodsd_no_rep(is_asize_32: bool, ds: i32) {
-    string_instruction(is_asize_32, ds, Instruction::Lods, Size::D, Rep::None)
+pub unsafe fn lodsd_no_rep(is_asize_32: bool, seg: i32) {
+    string_instruction(is_asize_32, seg, Instruction::Lods, Size::D, Rep::None)
 }
 
 #[no_mangle]
@@ -575,40 +585,40 @@ pub unsafe fn stosd_no_rep(is_asize_32: bool) {
 }
 
 #[no_mangle]
-pub unsafe fn cmpsb_repz(is_asize_32: bool, ds: i32) {
-    string_instruction(is_asize_32, ds, Instruction::Cmps, Size::B, Rep::Z)
+pub unsafe fn cmpsb_repz(is_asize_32: bool, seg: i32) {
+    string_instruction(is_asize_32, seg, Instruction::Cmps, Size::B, Rep::Z)
 }
 #[no_mangle]
-pub unsafe fn cmpsw_repz(is_asize_32: bool, ds: i32) {
-    string_instruction(is_asize_32, ds, Instruction::Cmps, Size::W, Rep::Z)
+pub unsafe fn cmpsw_repz(is_asize_32: bool, seg: i32) {
+    string_instruction(is_asize_32, seg, Instruction::Cmps, Size::W, Rep::Z)
 }
 #[no_mangle]
-pub unsafe fn cmpsd_repz(is_asize_32: bool, ds: i32) {
-    string_instruction(is_asize_32, ds, Instruction::Cmps, Size::D, Rep::Z)
+pub unsafe fn cmpsd_repz(is_asize_32: bool, seg: i32) {
+    string_instruction(is_asize_32, seg, Instruction::Cmps, Size::D, Rep::Z)
 }
 #[no_mangle]
-pub unsafe fn cmpsb_repnz(is_asize_32: bool, ds: i32) {
-    string_instruction(is_asize_32, ds, Instruction::Cmps, Size::B, Rep::NZ)
+pub unsafe fn cmpsb_repnz(is_asize_32: bool, seg: i32) {
+    string_instruction(is_asize_32, seg, Instruction::Cmps, Size::B, Rep::NZ)
 }
 #[no_mangle]
-pub unsafe fn cmpsw_repnz(is_asize_32: bool, ds: i32) {
-    string_instruction(is_asize_32, ds, Instruction::Cmps, Size::W, Rep::NZ)
+pub unsafe fn cmpsw_repnz(is_asize_32: bool, seg: i32) {
+    string_instruction(is_asize_32, seg, Instruction::Cmps, Size::W, Rep::NZ)
 }
 #[no_mangle]
-pub unsafe fn cmpsd_repnz(is_asize_32: bool, ds: i32) {
-    string_instruction(is_asize_32, ds, Instruction::Cmps, Size::D, Rep::NZ)
+pub unsafe fn cmpsd_repnz(is_asize_32: bool, seg: i32) {
+    string_instruction(is_asize_32, seg, Instruction::Cmps, Size::D, Rep::NZ)
 }
 #[no_mangle]
-pub unsafe fn cmpsb_no_rep(is_asize_32: bool, ds: i32) {
-    string_instruction(is_asize_32, ds, Instruction::Cmps, Size::B, Rep::None)
+pub unsafe fn cmpsb_no_rep(is_asize_32: bool, seg: i32) {
+    string_instruction(is_asize_32, seg, Instruction::Cmps, Size::B, Rep::None)
 }
 #[no_mangle]
-pub unsafe fn cmpsw_no_rep(is_asize_32: bool, ds: i32) {
-    string_instruction(is_asize_32, ds, Instruction::Cmps, Size::W, Rep::None)
+pub unsafe fn cmpsw_no_rep(is_asize_32: bool, seg: i32) {
+    string_instruction(is_asize_32, seg, Instruction::Cmps, Size::W, Rep::None)
 }
 #[no_mangle]
-pub unsafe fn cmpsd_no_rep(is_asize_32: bool, ds: i32) {
-    string_instruction(is_asize_32, ds, Instruction::Cmps, Size::D, Rep::None)
+pub unsafe fn cmpsd_no_rep(is_asize_32: bool, seg: i32) {
+    string_instruction(is_asize_32, seg, Instruction::Cmps, Size::D, Rep::None)
 }
 
 #[no_mangle]
@@ -646,28 +656,28 @@ pub unsafe fn scasd_no_rep(is_asize_32: bool) {
 }
 
 #[no_mangle]
-pub unsafe fn outsb_rep(is_asize_32: bool, ds: i32) {
-    string_instruction(is_asize_32, ds, Instruction::Outs, Size::B, Rep::Z)
+pub unsafe fn outsb_rep(is_asize_32: bool, seg: i32) {
+    string_instruction(is_asize_32, seg, Instruction::Outs, Size::B, Rep::Z)
 }
 #[no_mangle]
-pub unsafe fn outsw_rep(is_asize_32: bool, ds: i32) {
-    string_instruction(is_asize_32, ds, Instruction::Outs, Size::W, Rep::Z)
+pub unsafe fn outsw_rep(is_asize_32: bool, seg: i32) {
+    string_instruction(is_asize_32, seg, Instruction::Outs, Size::W, Rep::Z)
 }
 #[no_mangle]
-pub unsafe fn outsd_rep(is_asize_32: bool, ds: i32) {
-    string_instruction(is_asize_32, ds, Instruction::Outs, Size::D, Rep::Z)
+pub unsafe fn outsd_rep(is_asize_32: bool, seg: i32) {
+    string_instruction(is_asize_32, seg, Instruction::Outs, Size::D, Rep::Z)
 }
 #[no_mangle]
-pub unsafe fn outsb_no_rep(is_asize_32: bool, ds: i32) {
-    string_instruction(is_asize_32, ds, Instruction::Outs, Size::B, Rep::None)
+pub unsafe fn outsb_no_rep(is_asize_32: bool, seg: i32) {
+    string_instruction(is_asize_32, seg, Instruction::Outs, Size::B, Rep::None)
 }
 #[no_mangle]
-pub unsafe fn outsw_no_rep(is_asize_32: bool, ds: i32) {
-    string_instruction(is_asize_32, ds, Instruction::Outs, Size::W, Rep::None)
+pub unsafe fn outsw_no_rep(is_asize_32: bool, seg: i32) {
+    string_instruction(is_asize_32, seg, Instruction::Outs, Size::W, Rep::None)
 }
 #[no_mangle]
-pub unsafe fn outsd_no_rep(is_asize_32: bool, ds: i32) {
-    string_instruction(is_asize_32, ds, Instruction::Outs, Size::D, Rep::None)
+pub unsafe fn outsd_no_rep(is_asize_32: bool, seg: i32) {
+    string_instruction(is_asize_32, seg, Instruction::Outs, Size::D, Rep::None)
 }
 
 #[no_mangle]

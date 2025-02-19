@@ -40,7 +40,6 @@ else
             },
             baseurl: path.join(V86_ROOT, "/images/arch/"),
         },
-        screen_dummy: true,
         disable_jit: +process.env.DISABLE_JIT,
         log_level: 0,
     });
@@ -48,7 +47,7 @@ else
 
 emulator.bus.register("emulator-started", function()
 {
-    console.error("Booting now, please stand by");
+    console.log("Booting now, please stand by");
     start_time = Date.now();
 });
 
@@ -72,7 +71,7 @@ emulator.add_listener("serial0-output-byte", function(byte)
         const end_time = Date.now();
         const elapsed = end_time - start_time;
         console.log("Done in %dms", elapsed);
-        emulator.stop();
+        emulator.destroy();
 
         if(BENCH_COLLECT_STATS)
         {

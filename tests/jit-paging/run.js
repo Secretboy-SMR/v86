@@ -23,7 +23,7 @@ var emulator = new V86({
 
 emulator.bus.register("emulator-started", function()
 {
-    console.error("Booting now, please stand by");
+    console.log("Booting now, please stand by");
     emulator.create_file("test-jit", test_executable);
 });
 
@@ -63,7 +63,7 @@ emulator.add_listener("serial0-output-byte", async function(byte)
 
         const data = await emulator.read_file("/result");
 
-        emulator.stop();
+        emulator.destroy();
 
         let result = Buffer.from(data).toString();
         if(result !== "test_shared passed\ntest_consecutive_written passed\n")

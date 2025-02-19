@@ -7,9 +7,9 @@
 
 
 /** @constructor */
-function CPU(bus, wm, next_tick_immediately)
+function CPU(bus, wm, stop_idling)
 {
-    this.next_tick_immediately = next_tick_immediately;
+    this.stop_idling = stop_idling;
     this.wm = wm;
     this.wasm_patch();
     this.create_jit_imports();
@@ -26,6 +26,7 @@ function CPU(bus, wm, next_tick_immediately)
     this.segment_is_null = v86util.view(Uint8Array, memory, 724, 8);
     this.segment_offsets = v86util.view(Int32Array, memory, 736, 8);
     this.segment_limits = v86util.view(Uint32Array, memory, 768, 8);
+    this.segment_access_bytes = v86util.view(Uint8Array, memory, 512, 8);
 
     /**
      * Wheter or not in protected mode
@@ -195,7 +196,7 @@ CPU.prototype.create_jit_imports = function()
 
     jit_imports["m"] = this.wm.exports["memory"];
 
-    for(let name of Object.keys(this.wm.exports))
+    for(const name of Object.keys(this.wm.exports))
     {
         if(name.startsWith("_") || name.startsWith("zstd") || name.endsWith("_js"))
         {
@@ -271,6 +272,7 @@ CPU.prototype.wasm_patch = function()
 
     this.allocate_memory = get_import("allocate_memory");
     this.zero_memory = get_import("zero_memory");
+    this.is_memory_zeroed = get_import("is_memory_zeroed");
 
     this.svga_allocate_memory = get_import("svga_allocate_memory");
     this.svga_allocate_dest_buffer = get_import("svga_allocate_dest_buffer");
@@ -334,7 +336,7 @@ CPU.prototype.get_state = function()
     var state = [];
 
     state[0] = this.memory_size[0];
-    state[1] = this.segment_is_null;
+    state[1] = new Uint8Array([...this.segment_is_null, ...this.segment_access_bytes]);
     state[2] = this.segment_offsets;
     state[3] = this.segment_limits;
     state[4] = this.protected_mode[0];
@@ -417,6 +419,8 @@ CPU.prototype.get_state = function()
     state[80] = this.devices.uart2;
     state[81] = this.devices.uart3;
     state[82] = this.devices.virtio_console;
+    state[83] = this.devices.virtio_net;
+    state[84] = this.devices.virtio_balloon;
 
     return state;
 };
@@ -440,9 +444,9 @@ CPU.prototype.get_state_pic = function()
     state[7] = pic[7]; // state
     state[8] = pic[8]; // read_isr
     state[9] = pic[9]; // auto_eoi
-    state[10] = pic[10]; // special_mask_mode
-    state[11] = pic[11]; // elcr
-    state[12] = pic[12]; // irq_value (undefined in old state images)
+    state[10] = pic[10]; // elcr
+    state[11] = pic[11]; // irq_value
+    state[12] = pic[12]; // special_mask_mode
 
     state_slave[0] = pic_slave[0]; // irq_mask
     state_slave[1] = pic_slave[1]; // irq_map
@@ -455,8 +459,8 @@ CPU.prototype.get_state_pic = function()
     state_slave[8] = pic_slave[8]; // read_isr
     state_slave[9] = pic_slave[9]; // auto_eoi
     state_slave[10] = pic_slave[10]; // elcr
-    state_slave[12] = pic_slave[12]; // irq_value (undefined in old state images)
-    state_slave[12] = pic_slave[12]; // special_mask_mode (undefined in old state images)
+    state_slave[11] = pic_slave[11]; // irq_value
+    state_slave[12] = pic_slave[12]; // special_mask_mode
 
     return state;
 };
@@ -470,9 +474,25 @@ CPU.prototype.set_state = function(state)
         console.warn("Note: Memory size mismatch. we=" + this.mem8.length + " state=" + this.memory_size[0]);
     }
 
-    this.segment_is_null.set(state[1]);
+    if(state[1].length === 8)
+    {
+        // NOTE: support for old state images; delete this when bumping STATE_VERSION
+        this.segment_is_null.set(state[1]);
+        this.segment_access_bytes.fill(0x80 | (3 << 5) | 0x10 | 0x02);
+        this.segment_access_bytes[REG_CS] = 0x80 | (3 << 5) | 0x10 | 0x08 | 0x02;
+    }
+    else if(state[1].length === 16)
+    {
+        this.segment_is_null.set(state[1].subarray(0, 8));
+        this.segment_access_bytes.set(state[1].subarray(8, 16));
+    }
+    else
+    {
+        dbg_assert("Unexpected cpu segment state length:" + state[1].length);
+    }
     this.segment_offsets.set(state[2]);
     this.segment_limits.set(state[3]);
+
     this.protected_mode[0] = state[4];
     this.idtr_offset[0] = state[5];
     this.idtr_size[0] = state[6];
@@ -532,6 +552,8 @@ CPU.prototype.set_state = function(state)
     this.devices.uart2 && this.devices.uart2.set_state(state[80]);
     this.devices.uart3 && this.devices.uart3.set_state(state[81]);
     this.devices.virtio_console && this.devices.virtio_console.set_state(state[82]);
+    this.devices.virtio_net && this.devices.virtio_net.set_state(state[83]);
+    this.devices.virtio_balloon && this.devices.virtio_balloon.set_state(state[84]);
 
     this.fw_value = state[62];
 
@@ -581,9 +603,9 @@ CPU.prototype.set_state_pic = function(state)
     pic[7] = state[7]; // state
     pic[8] = state[8]; // read_isr
     pic[9] = state[9]; // auto_eoi
-    pic[10] = state[10]; // special_mask_mode
-    pic[11] = state[11]; // elcr
-    pic[12] = state[12]; // irq_value (undefined in old state images)
+    pic[10] = state[10]; // elcr
+    pic[11] = state[11]; // irq_value (undefined in old state images)
+    pic[12] = state[12]; // special_mask_mode (undefined in old state images)
 
     pic_slave[0] = state_slave[0]; // irq_mask
     pic_slave[1] = state_slave[1]; // irq_map
@@ -596,7 +618,7 @@ CPU.prototype.set_state_pic = function(state)
     pic_slave[8] = state_slave[8]; // read_isr
     pic_slave[9] = state_slave[9]; // auto_eoi
     pic_slave[10] = state_slave[10]; // elcr
-    pic_slave[12] = state_slave[12]; // irq_value (undefined in old state images)
+    pic_slave[11] = state_slave[11]; // irq_value (undefined in old state images)
     pic_slave[12] = state_slave[12]; // special_mask_mode (undefined in old state images)
 };
 
@@ -606,23 +628,9 @@ CPU.prototype.pack_memory = function()
 
     const page_count = this.mem8.length >> 12;
     const nonzero_pages = [];
-
     for(let page = 0; page < page_count; page++)
     {
-        const offset = page << 12;
-        const view = this.mem32s.subarray(offset >> 2, offset + 0x1000 >> 2);
-        let is_zero = true;
-
-        for(let i = 0; i < view.length; i++)
-        {
-            if(view[i] !== 0)
-            {
-                is_zero = false;
-                break;
-            }
-        }
-
-        if(!is_zero)
+        if(!this.is_memory_zeroed(page << 12, 0x1000))
         {
             nonzero_pages.push(page);
         }
@@ -631,7 +639,7 @@ CPU.prototype.pack_memory = function()
     const bitmap = new v86util.Bitmap(page_count);
     const packed_memory = new Uint8Array(nonzero_pages.length << 12);
 
-    for(let [i, page] of nonzero_pages.entries())
+    for(const [i, page] of nonzero_pages.entries())
     {
         bitmap.set(page, 1);
 
@@ -645,7 +653,7 @@ CPU.prototype.pack_memory = function()
 
 CPU.prototype.unpack_memory = function(bitmap, packed_memory)
 {
-    this.zero_memory(this.memory_size[0]);
+    this.zero_memory(0, this.memory_size[0]);
 
     const page_count = this.memory_size[0] >> 12;
     let packed_page = 0;
@@ -654,8 +662,8 @@ CPU.prototype.unpack_memory = function(bitmap, packed_memory)
     {
         if(bitmap.get(page))
         {
-            let offset = packed_page << 12;
-            let view = packed_memory.subarray(offset, offset + 0x1000);
+            const offset = packed_page << 12;
+            const view = packed_memory.subarray(offset, offset + 0x1000);
             this.mem8.set(view, page << 12);
             packed_page++;
         }
@@ -676,6 +684,10 @@ CPU.prototype.reboot_internal = function()
     {
         this.devices.virtio_console.reset();
     }
+    if(this.devices.virtio_net)
+    {
+        this.devices.virtio_net.reset();
+    }
 
     this.load_bios();
 };
@@ -685,16 +697,17 @@ CPU.prototype.reset_memory = function()
     this.mem8.fill(0);
 };
 
-/** @export */
-CPU.prototype.create_memory = function(size)
+CPU.prototype.create_memory = function(size, minimum_size)
 {
-    if(size < 1024 * 1024)
+    if(size < minimum_size)
     {
-        size = 1024 * 1024;
+        size = minimum_size;
+        dbg_log("Rounding memory size up to " + size, LOG_CPU);
     }
     else if((size | 0) < 0)
     {
         size = Math.pow(2, 31) - MMAP_BLOCK_SIZE;
+        dbg_log("Rounding memory size down to " + size, LOG_CPU);
     }
 
     size = ((size - 1) | (MMAP_BLOCK_SIZE - 1)) + 1 | 0;
@@ -711,16 +724,15 @@ CPU.prototype.create_memory = function(size)
     this.mem32s = v86util.view(Uint32Array, this.wasm_memory, memory_offset, size >> 2);
 };
 
+/**
+ * @param {BusConnector} device_bus
+ */
 CPU.prototype.init = function(settings, device_bus)
 {
-    if(typeof settings.log_level === "number")
-    {
-        // XXX: Shared between all emulator instances
-        LOG_LEVEL = settings.log_level;
-    }
-
-    this.create_memory(typeof settings.memory_size === "number" ?
-        settings.memory_size : 1024 * 1024 * 64);
+    this.create_memory(
+        settings.memory_size || 64 * 1024 * 1024,
+        settings.initrd ? 64 * 1024 * 1024 : 1024 * 1024,
+    );
 
     if(settings.disable_jit)
     {
@@ -917,8 +929,7 @@ CPU.prototype.init = function(settings, device_bus)
 
         this.devices.dma = new DMA(this);
 
-        this.devices.vga = new VGAScreen(this, device_bus,
-                settings.vga_memory_size || 8 * 1024 * 1024);
+        this.devices.vga = new VGAScreen(this, device_bus, settings.screen, settings.vga_memory_size || 8 * 1024 * 1024);
 
         this.devices.ps2 = new PS2(this, device_bus);
 
@@ -953,9 +964,13 @@ CPU.prototype.init = function(settings, device_bus)
 
         this.devices.pit = new PIT(this, device_bus);
 
-        if(settings.enable_ne2k)
+        if(settings.net_device.type === "ne2k")
         {
             this.devices.net = new Ne2k(this, device_bus, settings.preserve_mac_from_state_image, settings.mac_address_translation);
+        }
+        else if(settings.net_device.type === "virtio")
+        {
+            this.devices.virtio_net = new VirtioNet(this, device_bus, settings.preserve_mac_from_state_image);
         }
 
         if(settings.fs9p)
@@ -965,6 +980,9 @@ CPU.prototype.init = function(settings, device_bus)
         if(settings.virtio_console)
         {
             this.devices.virtio_console = new VirtioConsole(this, device_bus);
+        }
+        if(settings.virtio_balloon) {
+            this.devices.virtio_balloon = new VirtioBalloon(this, device_bus);
         }
 
         if(true)
@@ -1069,7 +1087,7 @@ CPU.prototype.load_multiboot_option_rom = function(buffer, initrd, cmdline)
 
         this.io.register_read(0xF4, this, function () {return 0;} , function () { return 0;}, function () {
             // actually do the load and return the multiboot magic
-            let multiboot_info_addr = 0x7C00;
+            const multiboot_info_addr = 0x7C00;
             let multiboot_data = multiboot_info_addr + MULTIBOOT_INFO_STRUCT_LEN;
             let info = 0;
 
@@ -1158,7 +1176,7 @@ CPU.prototype.load_multiboot_option_rom = function(buffer, initrd, cmdline)
                     var length = load_end_addr - load_addr;
                 }
 
-                let blob = new Uint8Array(buffer, file_start, length);
+                const blob = new Uint8Array(buffer, file_start, length);
                 cpu.write_blob(blob, load_addr);
 
                 entrypoint = entry_addr | 0;
@@ -1168,11 +1186,11 @@ CPU.prototype.load_multiboot_option_rom = function(buffer, initrd, cmdline)
             {
                 dbg_log("Multiboot image is in elf format", LOG_CPU);
 
-                let elf = read_elf(buffer);
+                const elf = read_elf(buffer);
 
                 entrypoint = elf.header.entry;
 
-                for(let program of elf.program_headers)
+                for(const program of elf.program_headers)
                 {
                     if(program.type === 0)
                     {
@@ -1188,7 +1206,7 @@ CPU.prototype.load_multiboot_option_rom = function(buffer, initrd, cmdline)
                         {
                             if(program.filesz) // offset might be outside of buffer if filesz is 0
                             {
-                                let blob = new Uint8Array(buffer, program.offset, program.filesz);
+                                const blob = new Uint8Array(buffer, program.offset, program.filesz);
                                 cpu.write_blob(blob, program.paddr);
                             }
                             top_of_load = Math.max(top_of_load, program.paddr + program.memsz);
@@ -1270,6 +1288,7 @@ CPU.prototype.load_multiboot_option_rom = function(buffer, initrd, cmdline)
                 cpu.segment_is_null[i] = 0;
                 cpu.segment_offsets[i] = 0;
                 cpu.segment_limits[i] = 0xFFFFFFFF;
+                // cpu.segment_access_bytes[i]
                 // Value doesn't matter, OS isn't allowed to reload without setting
                 // up a proper GDT
                 cpu.sreg[i] = 0xB002;
@@ -1402,7 +1421,7 @@ CPU.prototype.fill_cmos = function(rtc, settings)
     rtc.cmos_write(CMOS_BIOS_SMP_COUNT, 0);
 
     // Used by bochs BIOS to skip the boot menu delay.
-    if (settings.fastboot) rtc.cmos_write(0x3f, 0x01);
+    if(settings.fastboot) rtc.cmos_write(0x3f, 0x01);
 };
 
 CPU.prototype.load_bios = function()
@@ -1416,6 +1435,8 @@ CPU.prototype.load_bios = function()
         return;
     }
 
+    dbg_assert(bios instanceof ArrayBuffer);
+
     // load bios
     var data = new Uint8Array(bios),
         start = 0x100000 - bios.byteLength;
@@ -1424,6 +1445,8 @@ CPU.prototype.load_bios = function()
 
     if(vga_bios)
     {
+        dbg_assert(vga_bios instanceof ArrayBuffer);
+
         // load vga bios
         var vga_bios8 = new Uint8Array(vga_bios);
 
@@ -1662,17 +1685,3 @@ CPU.prototype.device_lower_irq = function(i)
         this.devices.ioapic.clear_irq(i);
     }
 };
-
-// Closure Compiler's way of exporting
-if(typeof window !== "undefined")
-{
-    window["CPU"] = CPU;
-}
-else if(typeof module !== "undefined" && typeof module.exports !== "undefined")
-{
-    module.exports["CPU"] = CPU;
-}
-else if(typeof importScripts === "function")
-{
-    self["CPU"] = CPU;
-}

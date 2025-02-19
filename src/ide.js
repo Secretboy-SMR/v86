@@ -331,7 +331,7 @@ IDEDevice.prototype.dma_write_command8 = function(value)
 {
     dbg_log("DMA write command8: " + h(value), LOG_DISK);
 
-    let old_command = this.dma_command;
+    const old_command = this.dma_command;
     this.dma_command = value & 0x9;
 
     if((old_command & 1) === (value & 1))
@@ -517,16 +517,6 @@ function IDEInterface(device, cpu, buffer, is_cd, device_nr, interface_nr, bus)
         //rtc.cmos_write(CMOS_BIOS_DISKTRANSFLAG,
         //    rtc.cmos_read(CMOS_BIOS_DISKTRANSFLAG) | 1 << (nr * 4 + 2)); // slave
     }
-
-    /** @const */
-    this.stats = {
-        sectors_read: 0,
-        sectors_written: 0,
-        bytes_read: 0,
-        bytes_written: 0,
-        loading: false,
-    };
-
 
     this.buffer = buffer;
 
@@ -1967,27 +1957,18 @@ IDEInterface.prototype.data_set = function(data)
 
 IDEInterface.prototype.report_read_start = function()
 {
-    this.stats.loading = true;
     this.bus.send("ide-read-start");
 };
 
 IDEInterface.prototype.report_read_end = function(byte_count)
 {
-    this.stats.loading = false;
-
-    var sector_count = byte_count / this.sector_size | 0;
-    this.stats.sectors_read += sector_count;
-    this.stats.bytes_read += byte_count;
-
+    const sector_count = byte_count / this.sector_size | 0;
     this.bus.send("ide-read-end", [this.nr, byte_count, sector_count]);
 };
 
 IDEInterface.prototype.report_write = function(byte_count)
 {
-    var sector_count = byte_count / this.sector_size | 0;
-    this.stats.sectors_written += sector_count;
-    this.stats.bytes_written += byte_count;
-
+    const sector_count = byte_count / this.sector_size | 0;
     this.bus.send("ide-write-end", [this.nr, byte_count, sector_count]);
 };
 

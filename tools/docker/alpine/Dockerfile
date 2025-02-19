@@ -1,37 +1,20 @@
-FROM i386/alpine:3.18.6
+FROM docker.io/i386/alpine:3.21.0
 
-ENV KERNEL=lts
-ENV HOSTNAME=localhost
-ENV ROOT_PASSWORD='root'
-ENV ADDPKGS=''
+ENV KERNEL=virt
+ENV ADDPKGS=nodejs
 
-RUN apk add openrc \ 
-            alpine-base \
-            agetty \
-            alpine-conf \ 
-            $ADDPKGS
+RUN apk add openrc alpine-base agetty alpine-conf linux-$KERNEL linux-firmware-none $ADDPKGS
 
-# Install mkinitfs from edge (todo: remove this when 3.19+ has worked properly with 9pfs)
-RUN apk add mkinitfs --no-cache --allow-untrusted --repository https://dl-cdn.alpinelinux.org/alpine/edge/main/ 
+RUN sed -i 's/getty 38400 tty1/agetty --autologin root tty1 linux/' /etc/inittab
+RUN echo 'ttyS0::respawn:/sbin/agetty --autologin root -s ttyS0 115200 vt100' >> /etc/inittab
+RUN echo "root:" | chpasswd
 
-RUN if [ "$KERNEL" == "lts" ]; then \
-    apk add linux-lts \
-            linux-firmware-none \
-            linux-firmware-sb16; \
-else \
-    apk add linux-$KERNEL; \
-fi
+RUN setup-hostname localhost
 
-RUN sed -i 's/getty 38400 tty1/agetty --autologin root tty1 linux/' /etc/inittab && \
-    echo "root:$ROOT_PASSWORD" | chpasswd
+# Adding networking.sh script
+RUN echo -e "rmmod ne2k-pci && modprobe ne2k-pci\nrmmod virtio-net && modprobe virtio-net\nhwclock -s\nsetup-interfaces -a -r" > /root/networking.sh && chmod +x /root/networking.sh
 
-RUN setup-hostname $HOSTNAME
-
-# Adding networking.sh script (works only on lts kernel yet)
-RUN if [ "$KERNEL" == "lts" ]; then \ 
-    echo -e "rmmod ne2k-pci && modprobe ne2k-pci\nhwclock -s\nsetup-interfaces -a -r" > /root/networking.sh && \ 
-    chmod +x /root/networking.sh; \ 
-fi
+RUN echo 'console.log("Hello, world!");' > /root/hello.js
 
 # https://wiki.alpinelinux.org/wiki/Alpine_Linux_in_a_chroot#Preparing_init_services
 RUN for i in devfs dmesg mdev hwdrivers; do rc-update add $i sysinit; done
@@ -39,4 +22,4 @@ RUN for i in hwclock modules sysctl hostname syslog bootmisc; do rc-update add $
 RUN rc-update add killprocs shutdown
 
 # Generate initramfs with 9p modules
-RUN mkinitfs -F "ata base ide scsi virtio ext4 9p" $(cat /usr/share/kernel/$KERNEL/kernel.release)
+RUN mkinitfs -F "base virtio 9p" $(cat /usr/share/kernel/$KERNEL/kernel.release)

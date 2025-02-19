@@ -320,7 +320,7 @@ if(cluster.isMaster)
         },
         {
             name: "Linux bzImage",
-            bzimage: root_path + "/images/buildroot-bzimage.bin",
+            bzimage: root_path + "/images/buildroot-bzimage68.bin",
             cmdline: "auto",
             timeout: 200,
             expected_texts: [
@@ -498,7 +498,7 @@ if(cluster.isMaster)
             ].join(" "),
             filesystem: {
                 basefs: "images/fs.json",
-                baseurl: "images/arch-nongz/",
+                baseurl: "images/arch/",
             },
             expected_texts: [
                 "root@localhost",
@@ -793,13 +793,13 @@ if(cluster.isMaster)
             multiboot: root_path + "/images/netbsd9.3-kernel-multiboot.img",
             expected_texts: [
                 // NOTE: doesn't success booting yet, just testing the multiboot boot
-                "[   1.0000030] isa0 at mainbus0",
+                "[   1.0000000] multiboot:",
             ],
         },
         {
             name: "Crazierl",
             skip_if_disk_image_missing: true,
-            timeout: 30,
+            timeout: 60,
             memory_size: 256 * 1024 * 1024,
             multiboot: root_path + "/images/crazierl-elf.img",
             initrd: root_path + "/images/crazierl-initrd.img",
@@ -1146,7 +1146,6 @@ function run_test(test, done)
                 clearInterval(screen_interval);
             }
 
-            emulator.stop();
             emulator.destroy();
 
             if(test.failure_allowed)
@@ -1201,20 +1200,17 @@ function run_test(test, done)
         check_test_done();
     });
 
-    emulator.add_listener("screen-set-mode", function(is_graphical)
+    emulator.add_listener("screen-set-size", function(args)
     {
-        graphical_test_done = is_graphical;
-        check_test_done();
-    });
+        const [w, h, bpp] = args;
+        graphical_test_done = bpp !== 0;
 
-    emulator.add_listener("screen-set-size-graphical", function(size)
-    {
         if(test.expect_graphical_size)
         {
-            size_test_done = size[0] === test.expect_graphical_size[0] &&
-                             size[1] === test.expect_graphical_size[1];
-            check_test_done();
+            size_test_done = w === test.expect_graphical_size[0] && h === test.expect_graphical_size[1];
         }
+
+        check_test_done();
     });
 
     emulator.add_listener("screen-put-char", function(chr)
